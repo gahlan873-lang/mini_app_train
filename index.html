@@ -2303,10 +2303,12 @@
         function initTelegram() {
             const tg = window.Telegram?.WebApp;
             if (!tg) return;
+            const initData = tg.initData || "";
+            if (!initData) return;
             state.isTelegram = true;
             tg.ready();
             tg.expand();
-            state.telegramInitData = tg.initData || "";
+            state.telegramInitData = initData;
             state.telegramUser = tg.initDataUnsafe?.user || null;
             updateAuthStatus();
             checkTelegramLink();
@@ -2455,7 +2457,7 @@
                 logoutButton.style.display = state.user ? "inline-flex" : "none";
             }
             if (authPanel) {
-                authPanel.style.display = state.user || state.isTelegram ? "none" : "grid";
+                authPanel.style.display = state.user ? "none" : "grid";
             }
             if (linkPanel) {
                 linkPanel.hidden = !state.user || state.isTelegram;
