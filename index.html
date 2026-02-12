@@ -123,6 +123,37 @@
             color: #cbd5f5;
         }
 
+        .link-panel,
+        .telegram-panel {
+            background: rgba(248, 250, 252, 0.12);
+            border-radius: 14px;
+            padding: 12px;
+            display: grid;
+            gap: 10px;
+            color: #e2e8f0;
+            margin-bottom: 16px;
+        }
+
+        .link-title,
+        .telegram-title {
+            font-weight: 700;
+            font-size: 14px;
+        }
+
+        .link-code {
+            font-size: 22px;
+            letter-spacing: 4px;
+            font-weight: 700;
+            color: #fff7ed;
+        }
+
+        .link-hint,
+        .telegram-hint,
+        .telegram-status {
+            font-size: 12px;
+            color: #cbd5f5;
+        }
+
         .export-btn {
             border: 0;
             background: rgba(248, 250, 252, 0.1);
@@ -929,6 +960,24 @@
             <div class="auth-status" id="authStatus">Синхронизация отключена</div>
         </div>
 
+        <div class="link-panel" id="linkPanel" hidden>
+            <div class="link-title">Привязка Telegram</div>
+            <div class="link-hint">Сгенерируйте код на сайте и введите его в Telegram Mini App.</div>
+            <div class="link-code" id="linkCode">— — — — — —</div>
+            <div class="link-hint" id="linkTimer">Код действует 10 минут.</div>
+            <button class="btn" type="button" data-action="generate-link">Сгенерировать код</button>
+        </div>
+
+        <div class="telegram-panel" id="telegramPanel" hidden>
+            <div class="telegram-title">Вход через Telegram</div>
+            <div class="telegram-status" id="telegramStatus">Проверяем привязку...</div>
+            <div class="form-row">
+                <input class="input" type="text" id="telegramCodeInput" placeholder="Код привязки" inputmode="numeric">
+                <button class="btn" type="button" data-action="telegram-link">Привязать</button>
+            </div>
+            <div class="telegram-hint">Введите 6-значный код с сайта.</div>
+        </div>
+
         <div class="tabs" id="tabs">
             <button class="tab-btn active" data-tab="calendar">Календарь</button>
             <button class="tab-btn" data-tab="workout">Тренировка</button>
@@ -992,6 +1041,7 @@
         </section>
     </div>
 
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script>
@@ -1000,6 +1050,8 @@
         const HISTORY_DEPTH_KEY = "historyDepth";
         const SUPABASE_URL = "https://dwgdefrmmykfzsvtcsjh.supabase.co";
         const SUPABASE_ANON_KEY = "sb_publishable_TAsCglmNK5MKehKbkS8gwg_b2uZK8ug";
+        const TELEGRAM_AUTH_FN = "telegram-auth";
+        const TELEGRAM_LINK_FN = "link-telegram";
 
         const CATALOG_RESET_VERSION = 1;
         const ANALOGY_ITEMS = [
@@ -1312,7 +1364,14 @@
             selectedSetByEntry: {},
             openMenuEntryId: null,
             openCatalogMenu: false,
-            catalogInlineMode: null
+            catalogInlineMode: null,
+            isTelegram: false,
+            telegramInitData: "",
+            telegramUser: null,
+            telegramLinked: false,
+            telegramSupabaseUserId: null,
+            linkCode: null,
+            linkTimerId: null
         };
 
         const CHART_TYPES = [
@@ -1360,8 +1419,15 @@
         const logoutButton = document.getElementById("logoutButton");
         const headerTitle = document.getElementById("headerTitle");
         const importFile = document.getElementById("importFile");
+        const linkPanel = document.getElementById("linkPanel");
+        const linkCode = document.getElementById("linkCode");
+        const linkTimer = document.getElementById("linkTimer");
+        const telegramPanel = document.getElementById("telegramPanel");
+        const telegramStatus = document.getElementById("telegramStatus");
+        const telegramCodeInput = document.getElementById("telegramCodeInput");
 
         initSupabase();
+        initTelegram();
         renderAll();
         setupEventListeners();
         initMotivation();
@@ -1410,6 +1476,8 @@
                 if (action === "auth-signin") signInWithPassword();
                 if (action === "auth-signup") signUpWithPassword();
                 if (action === "import-data") handleImportClick();
+                if (action === "generate-link") generateLinkCode();
+                if (action === "telegram-link") linkTelegramAccount();
             });
 
             entriesList.addEventListener("click", (event) => {
@@ -2218,16 +2286,160 @@
                 state.user = data.session?.user || null;
                 updateAuthStatus();
                 if (state.user) {
-                    syncFromSupabase();
+                    syncFromServer();
+                    refreshLinkStatus();
                 }
             });
             state.supabase.auth.onAuthStateChange((_event, session) => {
                 state.user = session?.user || null;
                 updateAuthStatus();
                 if (state.user) {
-                    syncFromSupabase();
+                    syncFromServer();
+                    refreshLinkStatus();
                 }
             });
+        }
+
+        function initTelegram() {
+            const tg = window.Telegram?.WebApp;
+            if (!tg) return;
+            state.isTelegram = true;
+            tg.ready();
+            tg.expand();
+            state.telegramInitData = tg.initData || "";
+            state.telegramUser = tg.initDataUnsafe?.user || null;
+            updateAuthStatus();
+            checkTelegramLink();
+        }
+
+        function syncFromServer() {
+            if (!state.user) return;
+            syncFromSupabase();
+        }
+
+        function setTelegramStatus(text) {
+            if (telegramStatus) {
+                telegramStatus.textContent = text;
+            }
+        }
+
+        async function checkTelegramLink() {
+            if (!state.supabase || !state.telegramInitData) {
+                setTelegramStatus("Telegram не доступен");
+                return;
+            }
+            setTelegramStatus("Проверяем привязку...");
+            const { data, error } = await state.supabase.functions.invoke(TELEGRAM_AUTH_FN, {
+                body: { initData: state.telegramInitData }
+            });
+            if (error || !data) {
+                setTelegramStatus("Ошибка проверки Telegram");
+                return;
+            }
+            if (!data.linked) {
+                state.telegramLinked = false;
+                setTelegramStatus("Аккаунт не привязан. Введите код.");
+                return;
+            }
+            state.telegramLinked = true;
+            state.telegramSupabaseUserId = data.supabase_user_id || null;
+            if (data.access_token) {
+                const { data: sessionData } = await state.supabase.auth.setSession({
+                    access_token: data.access_token,
+                    refresh_token: data.refresh_token || ""
+                });
+                state.user = sessionData.session?.user || state.user;
+                updateAuthStatus("Синхронизация включена (Telegram)");
+                syncFromServer();
+                setTelegramStatus("Привязка подтверждена");
+                return;
+            }
+            setTelegramStatus("Привязка найдена. Нужен токен авторизации.");
+        }
+
+        async function refreshLinkStatus() {
+            if (!state.supabase || !state.user) return;
+            const { data, error } = await state.supabase
+                .from("user_links")
+                .select("telegram_user_id")
+                .eq("supabase_user_id", state.user.id)
+                .maybeSingle();
+            if (error) return;
+            if (data?.telegram_user_id) {
+                if (linkTimer) {
+                    linkTimer.textContent = "Telegram привязан";
+                }
+            }
+        }
+
+        async function generateLinkCode() {
+            if (!state.supabase || !state.user) return;
+            const now = Date.now();
+            const expiresAt = new Date(now + 10 * 60 * 1000);
+            let code = "";
+            let saved = false;
+            for (let attempt = 0; attempt < 3; attempt += 1) {
+                code = String(Math.floor(Math.random() * 1000000)).padStart(6, "0");
+                const { error } = await state.supabase
+                    .from("link_codes")
+                    .insert({
+                        code,
+                        supabase_user_id: state.user.id,
+                        expires_at: expiresAt.toISOString()
+                    });
+                if (!error) {
+                    saved = true;
+                    break;
+                }
+            }
+            if (!saved) {
+                if (linkTimer) linkTimer.textContent = "Не удалось создать код";
+                return;
+            }
+            state.linkCode = code;
+            if (linkCode) linkCode.textContent = code.split("").join(" ");
+            startLinkTimer(expiresAt);
+        }
+
+        function startLinkTimer(expiresAt) {
+            if (state.linkTimerId) {
+                clearInterval(state.linkTimerId);
+            }
+            const update = () => {
+                const diff = expiresAt.getTime() - Date.now();
+                if (diff <= 0) {
+                    if (linkTimer) linkTimer.textContent = "Код истёк. Сгенерируйте новый.";
+                    clearInterval(state.linkTimerId);
+                    state.linkTimerId = null;
+                    return;
+                }
+                const minutes = Math.floor(diff / 60000);
+                const seconds = Math.floor((diff % 60000) / 1000);
+                if (linkTimer) {
+                    linkTimer.textContent = `Код действует ${minutes}:${String(seconds).padStart(2, "0")}`;
+                }
+            };
+            update();
+            state.linkTimerId = setInterval(update, 1000);
+        }
+
+        async function linkTelegramAccount() {
+            if (!state.supabase || !state.telegramInitData) return;
+            const code = telegramCodeInput?.value.trim();
+            if (!code || code.length !== 6) {
+                setTelegramStatus("Введите 6-значный код");
+                return;
+            }
+            setTelegramStatus("Привязываю...");
+            const { data, error } = await state.supabase.functions.invoke(TELEGRAM_LINK_FN, {
+                body: { initData: state.telegramInitData, code }
+            });
+            if (error || !data) {
+                setTelegramStatus("Ошибка привязки");
+                return;
+            }
+            setTelegramStatus("Привязка выполнена");
+            await checkTelegramLink();
         }
 
         function updateAuthStatus(message) {
@@ -2243,7 +2455,13 @@
                 logoutButton.style.display = state.user ? "inline-flex" : "none";
             }
             if (authPanel) {
-                authPanel.style.display = state.user ? "none" : "grid";
+                authPanel.style.display = state.user || state.isTelegram ? "none" : "grid";
+            }
+            if (linkPanel) {
+                linkPanel.hidden = !state.user || state.isTelegram;
+            }
+            if (telegramPanel) {
+                telegramPanel.hidden = !state.isTelegram;
             }
         }
 
