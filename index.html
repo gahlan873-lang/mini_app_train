@@ -317,13 +317,13 @@
 
         .templates-list {
             display: grid;
-            gap: 10px;
+            gap: 6px;
         }
 
         .template-item {
             background: #f8fafc;
             border-radius: 12px;
-            padding: 10px 12px;
+            padding: 8px 10px;
             border: 1px solid #e2e8f0;
             display: grid;
             grid-template-columns: 1fr auto;
@@ -333,6 +333,7 @@
 
         .template-name {
             font-weight: 600;
+            font-size: 14px;
         }
 
         .template-meta {
@@ -2291,7 +2292,6 @@
                         <div class="template-item">
                             <div>
                                 <div class="template-name">${escapeHtml(template.name)}</div>
-                                <div class="template-meta">${formatDate(template.sourceDateKey)}</div>
                             </div>
                             <div class="catalog-actions">
                                 <button class="ghost-btn" type="button" data-action="insert-template" data-template-id="${template.id}">Вставить</button>
@@ -2365,6 +2365,7 @@
             renderWorkout();
             renderCalendar();
             state.openTemplatePicker = false;
+            state.openCatalogMenu = false;
             renderCatalogPanel();
         }
 
