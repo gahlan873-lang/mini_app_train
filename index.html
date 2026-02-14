@@ -176,6 +176,10 @@
             transition: all 0.2s ease;
         }
 
+        .tab-btn.compact {
+            flex: 0.8;
+        }
+
         .tab-btn.active {
             background: #f8fafc;
             color: #0f172a;
@@ -282,6 +286,96 @@
             border-radius: 12px;
             font-weight: 700;
             color: #0f172a;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .icon-action.small {
+            min-width: 32px;
+            min-height: 32px;
+            padding: 6px;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .templates-panel {
+            margin-top: 16px;
+        }
+
+        .templates-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        .templates-title {
+            font-weight: 700;
+        }
+
+        .templates-list {
+            display: grid;
+            gap: 10px;
+        }
+
+        .template-item {
+            background: #f8fafc;
+            border-radius: 12px;
+            padding: 10px 12px;
+            border: 1px solid #e2e8f0;
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .template-name {
+            font-weight: 600;
+        }
+
+        .template-meta {
+            font-size: 12px;
+            color: var(--muted);
+            margin-top: 4px;
+        }
+
+        .export-canvas {
+            position: fixed;
+            left: -9999px;
+            top: 0;
+            width: 720px;
+        }
+
+        .export-sheet {
+            font-family: "Manrope", sans-serif;
+            background: #ffffff;
+            color: #0f172a;
+            border: 1px solid #e2e8f0;
+            border-radius: 16px;
+            padding: 20px;
+        }
+
+        .export-date {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 16px;
+        }
+
+        .export-entry {
+            margin-bottom: 14px;
+        }
+
+        .export-entry-title {
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .export-set {
+            font-size: 14px;
+            color: #1f2937;
+            margin-bottom: 4px;
         }
 
         .status-badge {
@@ -934,6 +1028,7 @@
             <button class="tab-btn active" data-tab="calendar">Календарь</button>
             <button class="tab-btn" data-tab="workout">Тренировка</button>
             <button class="tab-btn" data-tab="charts">Графики</button>
+            <button class="tab-btn compact" data-tab="templates">Шаблоны</button>
         </div>
 
         <section class="tab-panel active" id="tab-calendar">
@@ -952,10 +1047,14 @@
             <div class="panel">
                 <div class="workout-header">
                     <div class="workout-date" id="selectedDateLabel"></div>
-                    <div class="duration">Длительность: <span id="durationValue">00:00:00</span></div>
+                    <div class="duration">
+                        <span>Длительность: <span id="durationValue">00:00:00</span></span>
+                        <button class="icon-action small" type="button" data-action="reset-duration" aria-label="Сбросить время" title="Сбросить время">↻</button>
+                    </div>
                     <div class="tonnage">Тоннаж: <span id="tonnageValue">0</span> кг</div>
                     <div id="workoutStatus"></div>
                     <button class="ghost-btn" type="button" data-action="finish-workout">Завершить</button>
+                    <button class="ghost-btn" type="button" data-action="export-png">PNG</button>
                 </div>
                 <div class="tonnage-analogy" id="tonnageAnalogy"></div>
 
@@ -991,9 +1090,18 @@
                 </div>
             </div>
         </section>
+
+        <section class="tab-panel" id="tab-templates">
+            <div class="panel">
+                <div class="templates-panel" id="templatesPanel"></div>
+            </div>
+        </section>
     </div>
 
+    <div class="export-canvas" id="exportCanvas"></div>
+
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script>
         const GROUPS = ["Грудь", "Спина", "Руки", "Ноги", "Плечи", "Пресс"];
@@ -1313,6 +1421,7 @@
             selectedSetByEntry: {},
             openMenuEntryId: null,
             openCatalogMenu: false,
+            openTemplatePicker: false,
             catalogInlineMode: null
         };
 
@@ -1361,6 +1470,8 @@
         const logoutButton = document.getElementById("logoutButton");
         const headerTitle = document.getElementById("headerTitle");
         const importFile = document.getElementById("importFile");
+        const templatesPanel = document.getElementById("templatesPanel");
+        const exportCanvas = document.getElementById("exportCanvas");
 
         initSupabase();
         renderAll();
@@ -1411,6 +1522,12 @@
                 if (action === "auth-signin") signInWithPassword();
                 if (action === "auth-signup") signUpWithPassword();
                 if (action === "import-data") handleImportClick();
+                if (action === "reset-duration") resetDuration();
+                if (action === "export-png") exportWorkoutPng();
+                if (action === "save-template") saveWorkoutTemplate();
+                if (action === "insert-template") insertWorkoutTemplate(button.dataset.templateId);
+                if (action === "delete-template") deleteWorkoutTemplate(button.dataset.templateId);
+                if (action === "toggle-template-picker") toggleTemplatePicker();
             });
 
             entriesList.addEventListener("click", (event) => {
@@ -1530,6 +1647,7 @@
             renderCalendar();
             renderWorkout();
             renderCharts();
+            renderTemplatesPanel();
         }
 
         function renderCalendar() {
@@ -1699,6 +1817,7 @@
                 state.selectedCatalogExercise[group] = catalog[0];
             }
             const selected = state.selectedCatalogExercise[group] || "";
+            const templates = state.data.workoutTemplates || [];
             catalogPanel.innerHTML = `
                 <div class="catalog-header">
                     <div class="catalog-title">Справочник упражнений</div>
@@ -1727,6 +1846,23 @@
                                     <button class=\"menu-item\" data-action=\"catalog-add-start\">Добавить упражнение</button>
                                     <button class=\"menu-item\" data-action=\"catalog-rename-start\" ${selected ? "" : "disabled"}>Переименовать</button>
                                     <button class=\"menu-item\" data-action=\"catalog-delete\" ${selected ? "" : "disabled"}>Удалить</button>
+                                    <button class=\"menu-item\" data-action=\"save-template\">Сохранить тренировку как шаблон</button>
+                                    <button class=\"menu-item\" data-action=\"toggle-template-picker\" ${templates.length ? "" : "disabled"}>Вставить шаблон</button>
+                                    ${state.openTemplatePicker ? `
+                                        <div class=\"templates-list\">
+                                            ${templates.length ? templates.map(template => `
+                                                <div class=\"template-item\">
+                                                    <div>
+                                                        <div class=\"template-name\">${escapeHtml(template.name)}</div>
+                                                        <div class=\"template-meta\">${formatDate(template.sourceDateKey)}</div>
+                                                    </div>
+                                                    <div class=\"catalog-actions\">
+                                                        <button class=\"ghost-btn\" type=\"button\" data-action=\"insert-template\" data-template-id=\"${template.id}\">Вставить</button>
+                                                    </div>
+                                                </div>
+                                            `).join("") : `<div class=\"empty\">Шаблонов пока нет.</div>`}
+                                        </div>
+                                    ` : ""}
                                 </div>
                             ` : ""}
                         </div>
@@ -1915,6 +2051,14 @@
 
         function toggleCatalogMenu() {
             state.openCatalogMenu = !state.openCatalogMenu;
+            if (!state.openCatalogMenu) {
+                state.openTemplatePicker = false;
+            }
+            renderCatalogPanel();
+        }
+
+        function toggleTemplatePicker() {
+            state.openTemplatePicker = !state.openTemplatePicker;
             renderCatalogPanel();
         }
 
@@ -2135,6 +2279,147 @@
             renderCharts();
         }
 
+        function renderTemplatesPanel() {
+            if (!templatesPanel) return;
+            const templates = state.data.workoutTemplates || [];
+            templatesPanel.innerHTML = `
+                <div class="templates-header">
+                    <div class="templates-title">Шаблоны тренировок</div>
+                </div>
+                <div class="templates-list">
+                    ${templates.length ? templates.map(template => `
+                        <div class="template-item">
+                            <div>
+                                <div class="template-name">${escapeHtml(template.name)}</div>
+                                <div class="template-meta">${formatDate(template.sourceDateKey)}</div>
+                            </div>
+                            <div class="catalog-actions">
+                                <button class="ghost-btn" type="button" data-action="insert-template" data-template-id="${template.id}">Вставить</button>
+                                <button class="ghost-btn" type="button" data-action="delete-template" data-template-id="${template.id}">Удалить</button>
+                            </div>
+                        </div>
+                    `).join("") : `<div class="empty">Шаблонов пока нет.</div>`}
+                </div>
+            `;
+        }
+
+        function saveWorkoutTemplate() {
+            const workout = state.data.workoutsByDate[state.selectedDateKey];
+            if (!workout || !workout.entries?.length) {
+                alert("Нет упражнений для сохранения.");
+                return;
+            }
+            const name = window.prompt("Название шаблона:");
+            if (!name) return;
+            const cleanName = name.trim();
+            if (!cleanName) return;
+            const template = {
+                id: cryptoId(),
+                name: cleanName,
+                sourceDateKey: state.selectedDateKey,
+                createdAt: new Date().toISOString(),
+                entries: workout.entries.map(entry => ({
+                    group: entry.group,
+                    name: entry.name,
+                    sets: entry.sets.map(set => ({
+                        weight: set.weight,
+                        reps: set.reps
+                    }))
+                }))
+            };
+            state.data.workoutTemplates = [...(state.data.workoutTemplates || []), template];
+            saveData();
+            renderTemplatesPanel();
+            state.openTemplatePicker = false;
+            renderCatalogPanel();
+        }
+
+        function insertWorkoutTemplate(templateId) {
+            const templates = state.data.workoutTemplates || [];
+            const template = templates.find(item => item.id === templateId);
+            if (!template) return;
+            const confirmed = confirm("Перезаписать тренировку в выбранный день?");
+            if (!confirmed) return;
+            const workout = ensureWorkout(state.selectedDateKey);
+            const now = new Date().toISOString();
+            workout.entries = template.entries.map(entry => ({
+                id: cryptoId(),
+                group: entry.group,
+                name: entry.name,
+                sets: entry.sets.map(set => ({
+                    id: cryptoId(),
+                    weight: set.weight,
+                    reps: set.reps,
+                    restSec: 0,
+                    source: "previous",
+                    createdAt: now
+                }))
+            }));
+            workout.moodBefore = 0;
+            workout.moodAfter = 0;
+            workout.durationStart = null;
+            workout.durationSeconds = 0;
+            workout.finishedAt = null;
+            workout.updatedAt = now;
+            saveData();
+            renderWorkout();
+            renderCalendar();
+            state.openTemplatePicker = false;
+            renderCatalogPanel();
+        }
+
+        function deleteWorkoutTemplate(templateId) {
+            const templates = state.data.workoutTemplates || [];
+            state.data.workoutTemplates = templates.filter(item => item.id !== templateId);
+            saveData();
+            renderTemplatesPanel();
+            renderCatalogPanel();
+        }
+
+        function resetDuration() {
+            const workout = ensureWorkout(state.selectedDateKey);
+            workout.durationStart = null;
+            workout.durationSeconds = 0;
+            workout.updatedAt = new Date().toISOString();
+            saveData();
+            renderDuration();
+        }
+
+        async function exportWorkoutPng() {
+            const workout = ensureWorkout(state.selectedDateKey);
+            if (!exportCanvas) return;
+            const entries = workout.entries || [];
+            const body = entries.length ? entries.map(entry => {
+                const sets = (entry.sets || []).map((set, index) => (
+                    `<div class="export-set">#${index + 1} ${set.weight} кг × ${set.reps}</div>`
+                )).join("");
+                return `
+                    <div class="export-entry">
+                        <div class="export-entry-title">${escapeHtml(entry.name)}</div>
+                        ${sets}
+                    </div>
+                `;
+            }).join("") : `<div class="export-set">Нет упражнений.</div>`;
+
+            exportCanvas.innerHTML = `
+                <div class="export-sheet">
+                    <div class="export-date">${formatDate(state.selectedDateKey)}</div>
+                    ${body}
+                </div>
+            `;
+            const sheet = exportCanvas.firstElementChild;
+            if (!sheet || !window.htmlToImage) return;
+            try {
+                const dataUrl = await window.htmlToImage.toPng(sheet, { backgroundColor: "#ffffff" });
+                const link = document.createElement("a");
+                link.href = dataUrl;
+                link.download = `workout-${state.selectedDateKey}.png`;
+                link.click();
+            } catch (error) {
+                alert("Не удалось создать PNG.");
+            }
+        }
+
         function exportData() {
             const payload = {
                 exportedAt: new Date().toISOString(),
@@ -2191,6 +2476,7 @@
             const data = { ...payload };
             data.catalogByGroup = data.catalogByGroup || {};
             data.catalogUpdatedAt = data.catalogUpdatedAt || {};
+            data.workoutTemplates = Array.isArray(data.workoutTemplates) ? data.workoutTemplates : [];
             data.catalogResetVersion = CATALOG_RESET_VERSION;
             GROUPS.forEach(group => {
                 data.catalogByGroup[group] = normalizeCatalog(data.catalogByGroup[group] || []);
@@ -2702,6 +2988,7 @@
             }
             data.catalogByGroup = data.catalogByGroup || {};
             data.catalogUpdatedAt = data.catalogUpdatedAt || {};
+            data.workoutTemplates = Array.isArray(data.workoutTemplates) ? data.workoutTemplates : [];
             if (data.catalogResetVersion !== CATALOG_RESET_VERSION) {
                 overwriteCatalogWithDefaults(data);
                 data.catalogResetVersion = CATALOG_RESET_VERSION;
